@@ -1,19 +1,36 @@
 // ==UserScript==
 // @name         ITACA MD2 docent.edu.gva.es - Importador de Calificaciones y Observaciones
 // @namespace    https://lpla.github.io/
-// @version      0.3.1
+// @version      0.3.2
 // @description  Importa calificaciones y observaciones desde un archivo Excel a la plataforma "mòdul docent 2" (MD2) de ITACA.
 // @author       lpla
 // @match        https://docent.edu.gva.es/md-front/www/*
 // @require      https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/lpla/userscripts/main/icata.user.js
+// @updateURL    https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js
 // @downloadURL  https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js
 // @supportURL   https://github.com/lpla/userscripts/issues
 // ==/UserScript==
 
 (function() {
     'use strict';
+
+    const pluginStyle = document.createElement('style');
+    pluginStyle.textContent = `
+        #pluginContainer input[type="number"] {
+            width: 60px;
+            appearance: auto !important;
+            -moz-appearance: auto !important;
+        }
+    
+        #pluginContainer input[type="number"]::-webkit-outer-spin-button,
+        #pluginContainer input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: auto !important;
+            margin: 0;
+            opacity: 1 !important;
+        }
+    `;
+    document.head.appendChild(pluginStyle);
 
     // Función que detecta si se está en la vista de un aula basándose en la URL.
     // Se espera que la URL tenga el formato:
@@ -104,13 +121,16 @@
     configDiv.style.marginTop = '5px';
     configDiv.innerHTML = `
         <label style="display:block; margin-bottom:5px;">
-            Columna de nombres: <input type="number" id="col-name" min="1" value="1" style="width:50px;">
+            Columna de nombres:
+            <input type="number" id="col-name" min="1" step="1" value="1" inputmode="numeric" style="width:60px;">
         </label>
         <label style="display:block; margin-bottom:5px;">
-            Columna de notas: <input type="number" id="col-mark" min="1" value="2" style="width:50px;">
+            Columna de notas:
+            <input type="number" id="col-mark" min="1" step="1" value="2" inputmode="numeric" style="width:60px;">
         </label>
         <label style="display:block; margin-bottom:5px;">
-            Columna de observaciones: <input type="number" id="col-observation" min="1" value="3" style="width:50px;">
+            Columna de observaciones:
+            <input type="number" id="col-observation" min="1" step="1" value="3" inputmode="numeric" style="width:60px;">
         </label>
         <div id="statusMsg" style="margin-top:5px; font-weight:bold;"></div>
     `;
@@ -219,11 +239,15 @@
     }
 
     function extractMark(mark) {
-        if (typeof mark === 'string' || mark instanceof String) {
-            const match = mark.match(/^\d+/);
-            return match ? match[0] : '';
+        if (mark == null || mark === '') return '';
+    
+        if (typeof mark === 'number') {
+            return String(mark);
         }
-        return '';
+    
+        const text = String(mark).trim().replace(',', '.');
+        const match = text.match(/^\d+(?:\.\d+)?/);
+        return match ? match[0] : '';
     }
 
     function levenshtein(a, b) {
@@ -262,12 +286,33 @@
         return `${lastName}, ${firstName}`;
     }
 
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    async function waitForVisibleElement(selector, timeout = 3000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const el = document.querySelector(selector);
+            if (el && window.getComputedStyle(el).display !== 'none') {
+                return el;
+            }
+            await sleep(100);
+        }
+        return null;
+    }
+
+    function isReasonableMatch(a, b, distance) {
+        const maxLen = Math.max(a.length, b.length);
+        return distance <= Math.max(2, Math.floor(maxLen * 0.2));
+    }
+
     async function fillMarksAndObservations(studentData, colName, colMark, colObservation) {
         for (const row of studentData) {
             const name = row[colName];
             const mark = row[colMark];
             const observation = row[colObservation];
-            if (name && mark) {
+            if (name != null && name !== '' && mark != null && mark !== '') {
                 const isAlreadyFormatted = (typeof name === 'string' && name.includes(','));
                 let formattedName = isAlreadyFormatted ? name.trim() : formatExcelName(name);
                 const normalizedExcelName = normalizeName(formattedName);
@@ -320,7 +365,7 @@
                     }
                 }
 
-                if (bestMatch && bestMatchDistance <= 15) {
+                if (bestMatch && isReasonableMatch(normalizedExcelName, normalizeName(bestMatch.textContent), bestMatchDistance)) {
                     const markInputElement = bestMatch.parentNode.nextElementSibling.querySelector('input');
                     if (markInputElement) {
                         markInputElement.value = extractedMark;
@@ -337,8 +382,8 @@
                             const obsButton = studentRow.querySelector('div.imc-qualificacio > a');
                             if (obsButton) {
                                 obsButton.click();
-                                const modal = document.getElementById('imc-modul-observacions-avanzada');
-                                if (modal && window.getComputedStyle(modal).display !== 'none') {
+                                const modal = await waitForVisibleElement('#imc-modul-observacions-avanzada');
+                                if (modal) {
                                     const textarea = modal.querySelector('textarea.imc-f-observacions-avanzada');
                                     if (textarea) {
                                         textarea.value = observation;
