@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ITACA MD2 docent.edu.gva.es - Importador de Calificaciones y Observaciones
 // @namespace    https://lpla.github.io/
-// @version      0.4.3
+// @version      0.4.4
 // @description  Importa calificaciones y observaciones desde un archivo Excel a la plataforma "mòdul docent 2" (MD2) de ITACA.
 // @author       lpla
 // @match        https://docent.edu.gva.es/md-front/www/*
@@ -205,15 +205,11 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    function isElementVisible(el) {
-        return !!el && window.getComputedStyle(el).display !== 'none';
-    }
-
     async function waitForVisibleElement(selector, timeout = 3000) {
         const start = Date.now();
         while (Date.now() - start < timeout) {
             const el = document.querySelector(selector);
-            if (isElementVisible(el)) {
+            if (el && window.getComputedStyle(el).display !== 'none') {
                 return el;
             }
             await sleep(100);
@@ -275,6 +271,8 @@
             /\bobservacions?\b/,
             /\bcomentarios?\b/,
             /\bcomentaris?\b/,
+            /\bcomentari\b/,
+            /\bcomentaris\b/,
             /\bobs\b/
         ];
 
@@ -935,14 +933,8 @@
                     }
 
                     finalizeButton.click();
-
-                    const closed = await waitForHiddenElement('#imc-modul-observacions-avanzada');
-                    if (!closed) {
-                        stats.errors.push(`El modal de observaciones no se cerró a tiempo para: ${formattedName}`);
-                        continue;
-                    }
-
                     stats.observationsUpdated++;
+                    await sleep(150);
                 }
             } catch (error) {
                 console.error(`Error procesando al alumno ${formattedName}:`, error);
