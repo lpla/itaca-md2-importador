@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ITACA MD2 docent.edu.gva.es - Importador de Calificaciones y Observaciones
 // @namespace    https://lpla.github.io/
-// @version      0.3.2
+// @version      0.4.0
 // @description  Importa calificaciones y observaciones desde un archivo Excel a la plataforma "mòdul docent 2" (MD2) de ITACA.
 // @author       lpla
 // @match        https://docent.edu.gva.es/md-front/www/*
@@ -15,6 +15,11 @@
 (function() {
     'use strict';
 
+    const STORAGE_KEY = 'itaca-import-config';
+
+    let currentFileData = null;
+    let statusTimeoutId = null;
+
     const pluginStyle = document.createElement('style');
     pluginStyle.textContent = `
         #pluginContainer input[type="number"] {
@@ -22,49 +27,290 @@
             appearance: auto !important;
             -moz-appearance: auto !important;
         }
-    
+
         #pluginContainer input[type="number"]::-webkit-outer-spin-button,
         #pluginContainer input[type="number"]::-webkit-inner-spin-button {
             -webkit-appearance: auto !important;
             margin: 0;
             opacity: 1 !important;
         }
+
+        #pluginContainer button {
+            font-family: inherit;
+        }
+
+        #pluginContainer .plugin-box {
+            margin-top: 8px;
+            padding: 6px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(255,255,255,0.08);
+            font-size: 0.85em;
+        }
+
+        #pluginContainer .plugin-box h4 {
+            margin: 0 0 6px 0;
+            font-size: 1em;
+        }
+
+        #pluginContainer table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 0.8em;
+        }
+
+        #pluginContainer th,
+        #pluginContainer td {
+            border: 1px solid rgba(255,255,255,0.2);
+            padding: 4px;
+            vertical-align: top;
+            word-break: break-word;
+        }
+
+        #pluginContainer ul {
+            margin: 6px 0 0 18px;
+            padding: 0;
+        }
+
+        #pluginContainer .muted {
+            opacity: 0.85;
+            font-size: 0.8em;
+        }
+
+        #pluginContainer .compact {
+            margin: 4px 0;
+        }
     `;
     document.head.appendChild(pluginStyle);
 
-    // Función que detecta si se está en la vista de un aula basándose en la URL.
-    // Se espera que la URL tenga el formato:
-    // #centre/<centro>/grup/<grupo>/avaluacio/<evaluacion>/dades/<datos>
     function isInClassroom() {
         const hash = window.location.hash;
         const regex = /^#centre\/\d+\/grup\/\d+\/avaluacio\/\d+\/dades\/[\d;A-Z,]+$/;
         return regex.test(hash);
     }
 
-    // Función que crea el disclaimer con el espaciado adecuado.
     function getDisclaimerElement() {
         const disclaimer = document.createElement('p');
         disclaimer.style.fontSize = '0.6em';
         disclaimer.style.margin = '10px 0';
         disclaimer.style.color = 'white';
-        disclaimer.textContent = "Todos los datos introducidos se procesan en este ordenador y no se mandan ni se procesan en ningún servidor externo.";
+        disclaimer.textContent = 'Todos los datos introducidos se procesan en este ordenador y no se mandan ni se procesan en ningún servidor externo.';
         return disclaimer;
     }
 
-    // Crear contenedor principal del plugin (ancho ampliado)
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function normalizeName(name) {
+        return String(name ?? '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/-/g, ' ')
+            .trim()
+            .toLowerCase()
+            .replace(/\s+/g, ' ');
+    }
+
+    function normalizeHeaderText(value) {
+        return normalizeName(value).replace(/[^\p{L}\p{N}\s]/gu, ' ');
+    }
+
+    function extractMark(mark) {
+        if (mark == null || mark === '') return '';
+
+        if (typeof mark === 'number') {
+            return String(mark);
+        }
+
+        const text = String(mark).trim().replace(',', '.');
+        const match = text.match(/^\d+(?:\.\d+)?/);
+        return match ? match[0] : '';
+    }
+
+    function levenshtein(a, b) {
+        const tmp = [];
+        if (a.length === 0) { return b.length; }
+        if (b.length === 0) { return a.length; }
+        for (let i = 0; i <= b.length; i++) { tmp[i] = [i]; }
+        for (let j = 0; j <= a.length; j++) { tmp[0][j] = j; }
+        for (let i = 1; i <= b.length; i++) {
+            for (let j = 1; j <= a.length; j++) {
+                tmp[i][j] = b[i - 1] === a[j - 1]
+                    ? tmp[i - 1][j - 1]
+                    : Math.min(
+                        tmp[i - 1][j - 1] + 1,
+                        Math.min(tmp[i][j - 1] + 1, tmp[i - 1][j] + 1)
+                    );
+            }
+        }
+        return tmp[b.length][a.length];
+    }
+
+    function formatExcelName(name) {
+        const parts = String(name).trim().split(/\s+/);
+        if (parts.length > 2) {
+            const firstName = parts.slice(0, parts.length - 2).join(' ');
+            const lastNames = parts.slice(parts.length - 2).join(' ');
+            return `${lastNames}, ${firstName}`;
+        } else {
+            const firstName = parts[0] || '';
+            const lastNames = parts.slice(1).join(' ');
+            return `${lastNames}, ${firstName}`.trim();
+        }
+    }
+
+    function formatAlternativeExcelName(name) {
+        const parts = String(name).trim().split(/\s+/);
+        const firstName = parts.slice(0, -1).join(' ');
+        const lastName = parts.slice(-1).join(' ');
+        return `${lastName}, ${firstName}`.trim();
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    async function waitForVisibleElement(selector, timeout = 3000) {
+        const start = Date.now();
+        while (Date.now() - start < timeout) {
+            const el = document.querySelector(selector);
+            if (el && window.getComputedStyle(el).display !== 'none') {
+                return el;
+            }
+            await sleep(100);
+        }
+        return null;
+    }
+
+    function isReasonableMatch(a, b, distance) {
+        const maxLen = Math.max(a.length, b.length);
+        return distance <= Math.max(2, Math.floor(maxLen * 0.2));
+    }
+
+    function findColumnByRules(normalizedHeaders, rules) {
+        for (const rule of rules) {
+            const idx = normalizedHeaders.findIndex(h => rule.test(h));
+            if (idx !== -1) return idx;
+        }
+        return null;
+    }
+
+    function detectColumnsFromHeader(headers) {
+        const normalizedHeaders = headers.map(h => normalizeHeaderText(h));
+
+        const nameRules = [
+            /\bapellidos?\s+y\s+nombres?\b/,
+            /\bcognoms?\s+i\s+nom\b/,
+            /\bapellido(?:s)?\b.*\bnombre(?:s)?\b/,
+            /\bnombre(?:s)?\s+y\s+apellido(?:s)?\b/,
+            /\bnombre(?:s)?\s+completo(?:s)?\b/,
+            /\balumno(?:s)?\b/,
+            /\balumne(?:s)?\b/,
+            /\bestudiante(?:s)?\b/,
+            /\bnombre(?:s)?\b/,
+            /\bnom(?:s)?\b/
+        ];
+
+        const markRules = [
+            /\bcalificacion(?:es)?\b/,
+            /\bqualificacio(?:ns)?\b/,
+            /\bnota(?:s)?\b/,
+            /\bnota\s+final\b/,
+            /\bresultado(?:s)?\b/
+        ];
+
+        const observationRules = [
+            /\bobservaciones?\b/,
+            /\bobservacions?\b/,
+            /\bcomentarios?\b/,
+            /\bcomentaris?\b/,
+            /\bobs\b/
+        ];
+
+        return {
+            name: findColumnByRules(normalizedHeaders, nameRules),
+            mark: findColumnByRules(normalizedHeaders, markRules),
+            observation: findColumnByRules(normalizedHeaders, observationRules)
+        };
+    }
+
+    function findBestStudentMatch(studentEntries, normalizedPrimary, normalizedAlternative = '') {
+        for (const entry of studentEntries) {
+            if (entry.normalized === normalizedPrimary) {
+                return {
+                    match: entry.nameElement,
+                    distance: 0,
+                    exact: true,
+                    matchedSource: normalizedPrimary,
+                    normalizedTarget: entry.normalized
+                };
+            }
+        }
+
+        if (normalizedAlternative) {
+            for (const entry of studentEntries) {
+                if (entry.normalized === normalizedAlternative) {
+                    return {
+                        match: entry.nameElement,
+                        distance: 0,
+                        exact: true,
+                        matchedSource: normalizedAlternative,
+                        normalizedTarget: entry.normalized
+                    };
+                }
+            }
+        }
+
+        let bestEntry = null;
+        let bestDistance = Infinity;
+        let bestSource = normalizedPrimary;
+
+        for (const entry of studentEntries) {
+            let chosenSource = normalizedPrimary;
+            let distance = levenshtein(normalizedPrimary, entry.normalized);
+
+            if (normalizedAlternative) {
+                const alternativeDistance = levenshtein(normalizedAlternative, entry.normalized);
+                if (alternativeDistance < distance) {
+                    distance = alternativeDistance;
+                    chosenSource = normalizedAlternative;
+                }
+            }
+
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                bestEntry = entry;
+                bestSource = chosenSource;
+            }
+        }
+
+        return {
+            match: bestEntry ? bestEntry.nameElement : null,
+            distance: bestDistance,
+            exact: false,
+            matchedSource: bestSource,
+            normalizedTarget: bestEntry ? bestEntry.normalized : ''
+        };
+    }
+
     const pluginContainer = document.createElement('div');
     pluginContainer.id = 'pluginContainer';
     pluginContainer.style.position = 'fixed';
     pluginContainer.style.top = '10px';
     pluginContainer.style.left = '10px';
     pluginContainer.style.zIndex = '10000';
-    pluginContainer.style.background = '#576670';  // BLAU secundari
+    pluginContainer.style.background = '#576670';
     pluginContainer.style.color = 'white';
     pluginContainer.style.border = '1px solid #ccc';
     pluginContainer.style.fontFamily = 'sans-serif';
-    pluginContainer.style.width = '350px';  // Ancho ampliado
+    pluginContainer.style.width = '380px';
 
-    // Encabezado con botón de minimizar/restaurar
     const pluginHeader = document.createElement('div');
     pluginHeader.id = 'pluginHeader';
     pluginHeader.style.background = '#576670';
@@ -78,14 +324,12 @@
     headerTitle.textContent = 'Importador de Calificaciones';
     pluginHeader.appendChild(headerTitle);
 
-    // Pequeño texto de autoría debajo del título
     const devCredit = document.createElement('div');
     devCredit.style.fontSize = '0.6em';
     devCredit.style.margin = '10px 0';
     devCredit.style.textAlign = 'center';
     devCredit.innerHTML = 'Desarrollado por <a href="https://github.com/lpla" target="_blank" style="color: white; text-decoration: underline;">lpla</a>; soporte Excel por <a href="https://docs.sheetjs.com" target="_blank" style="color: white; text-decoration: underline;">SheetJS</a>';
 
-    // Botón para minimizar/restaurar
     const minimizeButton = document.createElement('button');
     minimizeButton.id = 'minimizeButton';
     minimizeButton.textContent = '–';
@@ -97,10 +341,8 @@
     pluginHeader.appendChild(minimizeButton);
 
     pluginContainer.appendChild(pluginHeader);
-    // Insertar el crédito debajo del header
     pluginContainer.appendChild(devCredit);
 
-    // Contenedor del contenido del plugin (se actualizará según el modo)
     const pluginContent = document.createElement('div');
     pluginContent.id = 'pluginContent';
     pluginContent.style.padding = '5px';
@@ -108,15 +350,23 @@
     pluginContainer.appendChild(pluginContent);
     document.body.appendChild(pluginContainer);
 
-    // Contenedor de controles (selector de archivo e inputs) a mostrar en aula
     const controlsContainer = document.createElement('div');
-    // Selector de archivo
+
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = '.xlsx, .xls';
     fileInput.style.width = '100%';
     controlsContainer.appendChild(fileInput);
-    // Contenedor de configuración (inputs para columnas y mensaje de estado)
+
+    const importButton = document.createElement('button');
+    importButton.textContent = 'Importar archivo preparado';
+    importButton.disabled = true;
+    importButton.style.width = '100%';
+    importButton.style.marginTop = '6px';
+    importButton.style.padding = '6px';
+    importButton.style.cursor = 'pointer';
+    controlsContainer.appendChild(importButton);
+
     const configDiv = document.createElement('div');
     configDiv.style.marginTop = '5px';
     configDiv.innerHTML = `
@@ -135,12 +385,493 @@
         <div id="statusMsg" style="margin-top:5px; font-weight:bold;"></div>
     `;
     controlsContainer.appendChild(configDiv);
-    fileInput.addEventListener('change', handleFile, false);
 
-    // Función para actualizar la interfaz del plugin según la URL
+    const colNameInput = configDiv.querySelector('#col-name');
+    const colMarkInput = configDiv.querySelector('#col-mark');
+    const colObservationInput = configDiv.querySelector('#col-observation');
+    const statusMsg = configDiv.querySelector('#statusMsg');
+
+    const previewContainer = document.createElement('div');
+    previewContainer.className = 'plugin-box';
+    previewContainer.style.display = 'none';
+    controlsContainer.appendChild(previewContainer);
+
+    const reportContainer = document.createElement('div');
+    reportContainer.className = 'plugin-box';
+    reportContainer.style.display = 'none';
+    controlsContainer.appendChild(reportContainer);
+
+    function saveConfig() {
+        const config = {
+            colName: colNameInput.value,
+            colMark: colMarkInput.value,
+            colObservation: colObservationInput.value
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    }
+
+    function loadConfig() {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+
+        try {
+            const config = JSON.parse(raw);
+            if (config.colName) colNameInput.value = config.colName;
+            if (config.colMark) colMarkInput.value = config.colMark;
+            if (config.colObservation) colObservationInput.value = config.colObservation;
+        } catch (error) {
+            console.warn('No se pudo cargar la configuración guardada:', error);
+        }
+    }
+
+    function getConfiguredColumns() {
+        const colName = parseInt(colNameInput.value, 10) - 1;
+        const colMark = parseInt(colMarkInput.value, 10) - 1;
+        const colObservation = parseInt(colObservationInput.value, 10) - 1;
+
+        if (Number.isNaN(colName) || colName < 0 || Number.isNaN(colMark) || colMark < 0) {
+            return null;
+        }
+
+        return {
+            colName,
+            colMark,
+            colObservation: Number.isNaN(colObservation) || colObservation < 0 ? null : colObservation
+        };
+    }
+
+    function setControlsDisabled(disabled) {
+        fileInput.disabled = disabled;
+        colNameInput.disabled = disabled;
+        colMarkInput.disabled = disabled;
+        colObservationInput.disabled = disabled;
+        importButton.disabled = disabled || !currentFileData;
+        importButton.style.cursor = importButton.disabled ? 'not-allowed' : 'pointer';
+    }
+
+    function showStatus(message, isError = false) {
+        if (!statusMsg) return;
+
+        statusMsg.textContent = message;
+        statusMsg.style.backgroundColor = isError ? '#d1a16d' : '#19afe0';
+        statusMsg.style.color = 'white';
+        statusMsg.style.padding = '3px';
+
+        if (statusTimeoutId) {
+            clearTimeout(statusTimeoutId);
+        }
+
+        statusTimeoutId = setTimeout(() => {
+            statusMsg.textContent = '';
+            statusMsg.style.backgroundColor = 'transparent';
+            statusMsg.style.padding = '0';
+        }, 5000);
+    }
+
+    function renderPreview() {
+        if (!currentFileData) {
+            previewContainer.style.display = 'none';
+            previewContainer.innerHTML = '';
+            return;
+        }
+
+        const configured = getConfiguredColumns();
+        if (!configured) {
+            previewContainer.style.display = 'block';
+            previewContainer.innerHTML = '<h4>Vista previa</h4><div>La configuración de columnas no es válida.</div>';
+            return;
+        }
+
+        const { headerRow, studentData, fileName, sheetName } = currentFileData;
+        const rows = studentData.slice(0, 5);
+
+        const previewColumns = [
+            { label: 'Nombres', index: configured.colName },
+            { label: 'Notas', index: configured.colMark },
+            { label: 'Observaciones', index: configured.colObservation }
+        ];
+
+        const tableHead = previewColumns.map(col => {
+            const headerValue = col.index != null ? (headerRow[col.index] ?? `Columna ${col.index + 1}`) : '(sin columna)';
+            const number = col.index != null ? `C${col.index + 1}` : '—';
+            return `<th>${escapeHtml(col.label)}<br><span class="muted">${escapeHtml(number)} · ${escapeHtml(headerValue)}</span></th>`;
+        }).join('');
+
+        const tableRows = rows.length
+            ? rows.map(row => {
+                const tds = previewColumns.map(col => {
+                    const value = col.index != null ? (row[col.index] ?? '') : '';
+                    return `<td>${escapeHtml(value)}</td>`;
+                }).join('');
+                return `<tr>${tds}</tr>`;
+            }).join('')
+            : '<tr><td colspan="3">No hay filas de datos en la hoja.</td></tr>';
+
+        previewContainer.style.display = 'block';
+        previewContainer.innerHTML = `
+            <h4>Vista previa</h4>
+            <div class="compact"><strong>Archivo:</strong> ${escapeHtml(fileName)}</div>
+            <div class="compact"><strong>Hoja:</strong> ${escapeHtml(sheetName)}</div>
+            <div class="compact muted">Se muestran las primeras ${rows.length} filas de datos con la configuración actual.</div>
+            <table style="margin-top:6px;">
+                <thead><tr>${tableHead}</tr></thead>
+                <tbody>${tableRows}</tbody>
+            </table>
+        `;
+    }
+
+    function renderReport(report) {
+        if (!report) {
+            reportContainer.style.display = 'none';
+            reportContainer.innerHTML = '';
+            return;
+        }
+
+        const unmatchedHtml = report.unmatched.length
+            ? `<div class="compact"><strong>No encontrados (${report.unmatched.length}):</strong></div>
+               <ul>${report.unmatched.slice(0, 10).map(name => `<li>${escapeHtml(name)}</li>`).join('')}</ul>
+               ${report.unmatched.length > 10 ? `<div class="muted">Y ${report.unmatched.length - 10} más.</div>` : ''}`
+            : '';
+
+        const invalidMarksHtml = report.invalidMarks.length
+            ? `<div class="compact" style="margin-top:8px;"><strong>Filas con nota no interpretable (${report.invalidMarks.length}):</strong></div>
+               <ul>${report.invalidMarks.slice(0, 10).map(name => `<li>${escapeHtml(name)}</li>`).join('')}</ul>
+               ${report.invalidMarks.length > 10 ? `<div class="muted">Y ${report.invalidMarks.length - 10} más.</div>` : ''}`
+            : '';
+
+        const errorsHtml = report.errors.length
+            ? `<div class="compact" style="margin-top:8px;"><strong>Incidencias (${report.errors.length}):</strong></div>
+               <ul>${report.errors.slice(0, 10).map(err => `<li>${escapeHtml(err)}</li>`).join('')}</ul>
+               ${report.errors.length > 10 ? `<div class="muted">Y ${report.errors.length - 10} más.</div>` : ''}`
+            : '';
+
+        reportContainer.style.display = 'block';
+        reportContainer.innerHTML = `
+            <h4>Informe de importación</h4>
+            <div class="compact"><strong>Filas leídas:</strong> ${report.totalRows}</div>
+            <div class="compact"><strong>Filas procesables:</strong> ${report.rowsConsidered}</div>
+            <div class="compact"><strong>Filas omitidas:</strong> ${report.rowsSkipped}</div>
+            <div class="compact"><strong>Coincidencias exactas:</strong> ${report.exactMatches}</div>
+            <div class="compact"><strong>Coincidencias aproximadas:</strong> ${report.fuzzyMatches}</div>
+            <div class="compact"><strong>Notas actualizadas:</strong> ${report.marksUpdated}</div>
+            <div class="compact"><strong>Observaciones actualizadas:</strong> ${report.observationsUpdated}</div>
+            <div class="compact"><strong>Guardado lanzado:</strong> ${report.saveTriggered ? 'sí' : 'no'}</div>
+            ${report.saveButtonMissing ? `<div class="compact" style="margin-top:6px;"><strong>Aviso:</strong> no se encontró el botón de guardar evaluación.</div>` : ''}
+            ${unmatchedHtml}
+            ${invalidMarksHtml}
+            ${errorsHtml}
+        `;
+    }
+
+    function applyDetectedColumns(detectedColumns) {
+        let changed = false;
+
+        if (detectedColumns.name != null) {
+            colNameInput.value = String(detectedColumns.name + 1);
+            changed = true;
+        }
+        if (detectedColumns.mark != null) {
+            colMarkInput.value = String(detectedColumns.mark + 1);
+            changed = true;
+        }
+        if (detectedColumns.observation != null) {
+            colObservationInput.value = String(detectedColumns.observation + 1);
+            changed = true;
+        }
+
+        if (changed) {
+            saveConfig();
+        }
+
+        return changed;
+    }
+
+    async function handleFileSelection(e) {
+        const file = e.target.files[0];
+        renderReport(null);
+        currentFileData = null;
+        importButton.disabled = true;
+
+        if (!file) {
+            showStatus('No se ha seleccionado ningún archivo.', true);
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onload = function(evt) {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const firstSheetName = workbook.SheetNames[0];
+
+                if (!firstSheetName) {
+                    throw new Error('El archivo no contiene hojas.');
+                }
+
+                const worksheet = workbook.Sheets[firstSheetName];
+                const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+
+                if (!jsonData.length) {
+                    throw new Error('La hoja está vacía.');
+                }
+
+                const headerRow = Array.isArray(jsonData[0]) ? jsonData[0] : [];
+                const studentData = jsonData.slice(1);
+
+                currentFileData = {
+                    fileName: file.name,
+                    sheetName: firstSheetName,
+                    headerRow,
+                    studentData
+                };
+
+                const detectedColumns = detectColumnsFromHeader(headerRow);
+                const autoDetected = applyDetectedColumns(detectedColumns);
+
+                renderPreview();
+                setControlsDisabled(false);
+
+                if (studentData.length === 0) {
+                    showStatus('Archivo cargado, pero la hoja no contiene filas de datos.', true);
+                    return;
+                }
+
+                if (autoDetected) {
+                    showStatus('Archivo preparado y columnas autodetectadas. Revise la vista previa antes de importar.');
+                } else {
+                    showStatus('Archivo preparado. Revise las columnas y la vista previa antes de importar.');
+                }
+            } catch (error) {
+                console.error('Error al procesar el archivo:', error);
+                currentFileData = null;
+                renderPreview();
+                renderReport(null);
+                setControlsDisabled(false);
+                showStatus(`Error al procesar el archivo: ${error.message}`, true);
+            } finally {
+                fileInput.value = '';
+            }
+        };
+
+        reader.onerror = function(err) {
+            console.error('Error al leer el archivo:', err);
+            currentFileData = null;
+            renderPreview();
+            renderReport(null);
+            setControlsDisabled(false);
+            fileInput.value = '';
+            showStatus('Error al leer el archivo.', true);
+        };
+
+        reader.readAsArrayBuffer(file);
+    }
+
+    async function fillMarksAndObservations(studentData, colName, colMark, colObservation) {
+        const stats = {
+            totalRows: studentData.length,
+            rowsConsidered: 0,
+            rowsSkipped: 0,
+            exactMatches: 0,
+            fuzzyMatches: 0,
+            marksUpdated: 0,
+            observationsUpdated: 0,
+            unmatched: [],
+            invalidMarks: [],
+            errors: [],
+            saveTriggered: false,
+            saveButtonMissing: false
+        };
+
+        const studentEntries = Array.from(document.querySelectorAll('div.imc-nom > p')).map(nameElement => ({
+            nameElement,
+            normalized: normalizeName(nameElement.textContent)
+        }));
+
+        if (!studentEntries.length) {
+            throw new Error('No se encontraron alumnos en la página de ITACA.');
+        }
+
+        for (const row of studentData) {
+            const name = row[colName];
+            const mark = row[colMark];
+            const observation = colObservation != null ? row[colObservation] : '';
+
+            if (name == null || name === '' || mark == null || mark === '') {
+                stats.rowsSkipped++;
+                continue;
+            }
+
+            stats.rowsConsidered++;
+
+            const rawName = String(name).trim();
+            const isAlreadyFormatted = rawName.includes(',');
+            const formattedName = isAlreadyFormatted ? rawName : formatExcelName(rawName);
+            const normalizedExcelName = normalizeName(formattedName);
+            const normalizedAlternativeExcelName = !isAlreadyFormatted
+                ? normalizeName(formatAlternativeExcelName(rawName))
+                : '';
+
+            const extractedMark = extractMark(mark);
+            if (extractedMark === '') {
+                stats.invalidMarks.push(formattedName);
+                continue;
+            }
+
+            const matchResult = findBestStudentMatch(
+                studentEntries,
+                normalizedExcelName,
+                normalizedAlternativeExcelName
+            );
+
+            const acceptable = matchResult.match && (
+                matchResult.exact ||
+                isReasonableMatch(
+                    matchResult.matchedSource,
+                    matchResult.normalizedTarget,
+                    matchResult.distance
+                )
+            );
+
+            if (!acceptable) {
+                stats.unmatched.push(formattedName);
+                continue;
+            }
+
+            if (matchResult.exact) {
+                stats.exactMatches++;
+            } else {
+                stats.fuzzyMatches++;
+            }
+
+            const bestMatch = matchResult.match;
+            const studentRow = bestMatch.closest('li');
+
+            try {
+                const markInputElement = bestMatch.parentNode.nextElementSibling?.querySelector('input');
+                if (markInputElement) {
+                    markInputElement.value = extractedMark;
+                    markInputElement.dispatchEvent(new Event('input', { bubbles: true }));
+                    markInputElement.dispatchEvent(new Event('change', { bubbles: true }));
+                    markInputElement.dispatchEvent(new Event('blur', { bubbles: true }));
+                    stats.marksUpdated++;
+                } else {
+                    stats.errors.push(`No se encontró el input de nota para: ${formattedName}`);
+                }
+
+                if (observation != null && String(observation).trim() !== '') {
+                    if (!studentRow) {
+                        stats.errors.push(`No se encontró la fila del alumno para las observaciones: ${formattedName}`);
+                        continue;
+                    }
+
+                    const obsButton = studentRow.querySelector('div.imc-qualificacio > a');
+                    if (!obsButton) {
+                        stats.errors.push(`No se encontró el botón de observaciones para: ${formattedName}`);
+                        continue;
+                    }
+
+                    obsButton.click();
+
+                    const modal = await waitForVisibleElement('#imc-modul-observacions-avanzada');
+                    if (!modal) {
+                        stats.errors.push(`El modal de observaciones no se abrió para: ${formattedName}`);
+                        continue;
+                    }
+
+                    const textarea = modal.querySelector('textarea.imc-f-observacions-avanzada');
+                    if (!textarea) {
+                        stats.errors.push(`No se encontró el textarea de observaciones para: ${formattedName}`);
+                        continue;
+                    }
+
+                    textarea.value = String(observation);
+                    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+                    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+                    textarea.dispatchEvent(new Event('blur', { bubbles: true }));
+
+                    const finalizeButton = modal.querySelector('a.imc-bt-finalitza');
+                    if (!finalizeButton) {
+                        stats.errors.push(`No se encontró el botón "Finaliza" para: ${formattedName}`);
+                        continue;
+                    }
+
+                    finalizeButton.click();
+                    stats.observationsUpdated++;
+                    await sleep(150);
+                }
+            } catch (error) {
+                console.error(`Error procesando al alumno ${formattedName}:`, error);
+                stats.errors.push(`Error procesando ${formattedName}: ${error.message}`);
+            }
+        }
+
+        const updateButton = document.getElementById('imc-bt-guarda-avaluacio');
+        if (updateButton) {
+            updateButton.disabled = false;
+            updateButton.click();
+            stats.saveTriggered = true;
+        } else {
+            stats.saveButtonMissing = true;
+            console.warn('No se encontró el botón de guardar evaluación.');
+        }
+
+        return stats;
+    }
+
+    async function handleImport() {
+        if (!currentFileData) {
+            showStatus('Primero seleccione un archivo.', true);
+            return;
+        }
+
+        const configured = getConfiguredColumns();
+        if (!configured) {
+            showStatus('La configuración de columnas no es válida.', true);
+            return;
+        }
+
+        saveConfig();
+        setControlsDisabled(true);
+        importButton.textContent = 'Importando...';
+        showStatus('Procesando datos...');
+
+        try {
+            const report = await fillMarksAndObservations(
+                currentFileData.studentData,
+                configured.colName,
+                configured.colMark,
+                configured.colObservation
+            );
+
+            renderReport(report);
+            showStatus('Proceso completado.');
+            console.log('Resumen importación:', report);
+        } catch (error) {
+            console.error('Error durante la importación:', error);
+            renderReport({
+                totalRows: currentFileData.studentData.length,
+                rowsConsidered: 0,
+                rowsSkipped: 0,
+                exactMatches: 0,
+                fuzzyMatches: 0,
+                marksUpdated: 0,
+                observationsUpdated: 0,
+                unmatched: [],
+                invalidMarks: [],
+                errors: [error.message],
+                saveTriggered: false,
+                saveButtonMissing: false
+            });
+            showStatus(`Error durante la importación: ${error.message}`, true);
+        } finally {
+            importButton.textContent = 'Importar archivo preparado';
+            setControlsDisabled(false);
+        }
+    }
+
     function updatePluginUI() {
         if (!isInClassroom()) {
-            // No se está en aula: mostrar instrucciones
             if (pluginContent.getAttribute('data-mode') !== 'instructions') {
                 pluginContent.innerHTML = '';
                 const instructions = document.createElement('p');
@@ -152,20 +883,33 @@
                 pluginContent.setAttribute('data-mode', 'instructions');
             }
         } else {
-            // Se está en aula: mostrar los controles si aún no se han mostrado
             if (pluginContent.getAttribute('data-mode') !== 'controls') {
                 pluginContent.innerHTML = '';
                 pluginContent.appendChild(controlsContainer);
                 pluginContent.appendChild(getDisclaimerElement());
                 pluginContent.setAttribute('data-mode', 'controls');
+                renderPreview();
+                renderReport(null);
+                setControlsDisabled(false);
             }
         }
     }
-    // Usar el evento hashchange para actualizar la UI y llamar a updatePluginUI inmediatamente.
-    window.addEventListener("hashchange", updatePluginUI);
+
+    fileInput.addEventListener('change', handleFileSelection, false);
+    importButton.addEventListener('click', handleImport);
+
+    [colNameInput, colMarkInput, colObservationInput].forEach(input => {
+        input.addEventListener('change', () => {
+            saveConfig();
+            renderPreview();
+        });
+    });
+
+    loadConfig();
+
+    window.addEventListener('hashchange', updatePluginUI);
     updatePluginUI();
 
-    // Funcionalidad de minimizar/restaurar
     minimizeButton.addEventListener('click', function() {
         if (pluginContent.style.display === 'none') {
             pluginContent.style.display = 'block';
@@ -175,251 +919,4 @@
             minimizeButton.textContent = '+';
         }
     });
-
-    // Función para mostrar mensajes de estado que desaparecen a los 5 segundos.
-    // Se usa BLAU (#19afe0) para mensajes normales y ROSA (#d1a16d) para errores.
-    function showStatus(message, isError=false) {
-        const statusMsg = document.getElementById('statusMsg');
-        if (statusMsg) {
-            statusMsg.textContent = message;
-            statusMsg.style.backgroundColor = isError ? '#d1a16d' : '#19afe0';
-            statusMsg.style.color = 'white';
-            statusMsg.style.padding = '3px';
-            setTimeout(() => {
-                statusMsg.textContent = '';
-                statusMsg.style.backgroundColor = 'transparent';
-            }, 5000);
-        }
-    }
-
-    function handleFile(e) {
-        const file = e.target.files[0];
-        if (!file) {
-            showStatus('No se ha seleccionado ningún archivo.', true);
-            return;
-        }
-        console.log("Archivo seleccionado:", file);
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, {type: 'array'});
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
-                // Se asume que la primera fila contiene cabeceras
-                const studentData = jsonData.slice(1);
-                // Obtener índices configurados (los valores se introducen en base 1 y se convierten a base 0)
-                const colName = parseInt(document.getElementById('col-name').value, 10) - 1;
-                const colMark = parseInt(document.getElementById('col-mark').value, 10) - 1;
-                const colObservation = parseInt(document.getElementById('col-observation').value, 10) - 1;
-                showStatus('Procesando datos...');
-                await fillMarksAndObservations(studentData, colName, colMark, colObservation);
-                showStatus('Proceso completado.');
-            } catch (error) {
-                console.error('Error al procesar el archivo:', error);
-                showStatus('Error al procesar el archivo.', true);
-            }
-        };
-        reader.onerror = function(e) {
-            console.error('Error al leer el archivo:', e);
-            showStatus('Error al leer el archivo.', true);
-        };
-        reader.readAsArrayBuffer(file);
-    }
-
-    function normalizeName(name) {
-        return name
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/-/g, ' ')
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, ' ');
-    }
-
-    function extractMark(mark) {
-        if (mark == null || mark === '') return '';
-    
-        if (typeof mark === 'number') {
-            return String(mark);
-        }
-    
-        const text = String(mark).trim().replace(',', '.');
-        const match = text.match(/^\d+(?:\.\d+)?/);
-        return match ? match[0] : '';
-    }
-
-    function levenshtein(a, b) {
-        const tmp = [];
-        if (a.length === 0) { return b.length; }
-        if (b.length === 0) { return a.length; }
-        for (let i = 0; i <= b.length; i++) { tmp[i] = [i]; }
-        for (let j = 0; j <= a.length; j++) { tmp[0][j] = j; }
-        for (let i = 1; i <= b.length; i++) {
-            for (let j = 1; j <= a.length; j++) {
-                tmp[i][j] = b[i - 1] === a[j - 1] ?
-                    tmp[i - 1][j - 1] :
-                    Math.min(tmp[i - 1][j - 1] + 1, Math.min(tmp[i][j - 1] + 1, tmp[i - 1][j] + 1));
-            }
-        }
-        return tmp[b.length][a.length];
-    }
-
-    function formatExcelName(name) {
-        const parts = name.trim().split(/\s+/);
-        if (parts.length > 2) {
-            const firstName = parts.slice(0, parts.length - 2).join(' ');
-            const lastNames = parts.slice(parts.length - 2).join(' ');
-            return `${lastNames}, ${firstName}`;
-        } else {
-            const firstName = parts[0];
-            const lastNames = parts.slice(1).join(' ');
-            return `${lastNames}, ${firstName}`;
-        }
-    }
-
-    function formatAlternativeExcelName(name) {
-        const parts = name.trim().split(/\s+/);
-        const firstName = parts.slice(0, -1).join(' ');
-        const lastName = parts.slice(-1).join(' ');
-        return `${lastName}, ${firstName}`;
-    }
-
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-    
-    async function waitForVisibleElement(selector, timeout = 3000) {
-        const start = Date.now();
-        while (Date.now() - start < timeout) {
-            const el = document.querySelector(selector);
-            if (el && window.getComputedStyle(el).display !== 'none') {
-                return el;
-            }
-            await sleep(100);
-        }
-        return null;
-    }
-
-    function isReasonableMatch(a, b, distance) {
-        const maxLen = Math.max(a.length, b.length);
-        return distance <= Math.max(2, Math.floor(maxLen * 0.2));
-    }
-
-    async function fillMarksAndObservations(studentData, colName, colMark, colObservation) {
-        for (const row of studentData) {
-            const name = row[colName];
-            const mark = row[colMark];
-            const observation = row[colObservation];
-            if (name != null && name !== '' && mark != null && mark !== '') {
-                const isAlreadyFormatted = (typeof name === 'string' && name.includes(','));
-                let formattedName = isAlreadyFormatted ? name.trim() : formatExcelName(name);
-                const normalizedExcelName = normalizeName(formattedName);
-                const extractedMark = extractMark(mark);
-                const nameElements = document.evaluate(`//div[@class='imc-nom']/p`, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-                let exactMatch = false;
-                let bestMatch = null;
-                let bestMatchDistance = Infinity;
-
-                for (let i = 0; i < nameElements.snapshotLength; i++) {
-                    const nameElement = nameElements.snapshotItem(i);
-                    const normalizedHtmlName = normalizeName(nameElement.textContent);
-                    if (normalizedExcelName === normalizedHtmlName) {
-                        exactMatch = true;
-                        bestMatch = nameElement;
-                        bestMatchDistance = 0;
-                        break;
-                    }
-                }
-
-                if (!exactMatch && !isAlreadyFormatted) {
-                    const alternativeFormat = formatAlternativeExcelName(name);
-                    const normalizedAlternativeExcelName = normalizeName(alternativeFormat);
-                    for (let i = 0; i < nameElements.snapshotLength; i++) {
-                        const nameElement = nameElements.snapshotItem(i);
-                        const normalizedHtmlName = normalizeName(nameElement.textContent);
-                        if (normalizedAlternativeExcelName === normalizedHtmlName) {
-                            exactMatch = true;
-                            bestMatch = nameElement;
-                            bestMatchDistance = 0;
-                            break;
-                        }
-                        const distance = levenshtein(normalizedAlternativeExcelName, normalizedHtmlName);
-                        if (distance < bestMatchDistance) {
-                            bestMatch = nameElement;
-                            bestMatchDistance = distance;
-                        }
-                    }
-                }
-
-                if (!exactMatch) {
-                    for (let i = 0; i < nameElements.snapshotLength; i++) {
-                        const nameElement = nameElements.snapshotItem(i);
-                        const normalizedHtmlName = normalizeName(nameElement.textContent);
-                        const distance = levenshtein(normalizedExcelName, normalizedHtmlName);
-                        if (distance < bestMatchDistance) {
-                            bestMatch = nameElement;
-                            bestMatchDistance = distance;
-                        }
-                    }
-                }
-
-                if (bestMatch && isReasonableMatch(normalizedExcelName, normalizeName(bestMatch.textContent), bestMatchDistance)) {
-                    const markInputElement = bestMatch.parentNode.nextElementSibling.querySelector('input');
-                    if (markInputElement) {
-                        markInputElement.value = extractedMark;
-                        markInputElement.dispatchEvent(new Event('input', { bubbles: true }));
-                        markInputElement.dispatchEvent(new Event('change', { bubbles: true }));
-                        markInputElement.dispatchEvent(new Event('blur', { bubbles: true }));
-                    } else {
-                        console.warn('No se encontró el input para la nota del alumno:', formattedName);
-                    }
-
-                    if (observation) {
-                        const studentRow = bestMatch.closest('li');
-                        if (studentRow) {
-                            const obsButton = studentRow.querySelector('div.imc-qualificacio > a');
-                            if (obsButton) {
-                                obsButton.click();
-                                const modal = await waitForVisibleElement('#imc-modul-observacions-avanzada');
-                                if (modal) {
-                                    const textarea = modal.querySelector('textarea.imc-f-observacions-avanzada');
-                                    if (textarea) {
-                                        textarea.value = observation;
-                                        textarea.dispatchEvent(new Event('input', { bubbles: true }));
-                                        textarea.dispatchEvent(new Event('change', { bubbles: true }));
-                                        textarea.dispatchEvent(new Event('blur', { bubbles: true }));
-                                    } else {
-                                        console.warn('No se encontró el textarea de observaciones para el alumno:', formattedName);
-                                    }
-                                    const finalizeButton = modal.querySelector('a.imc-bt-finalitza');
-                                    if (finalizeButton) {
-                                        finalizeButton.click();
-                                    } else {
-                                        console.warn('No se encontró el botón "Finaliza" en el modal de observaciones.');
-                                    }
-                                } else {
-                                    console.warn('Modal de observaciones no se abrió para el alumno:', formattedName);
-                                }
-                            } else {
-                                console.warn('No se encontró el botón de observaciones para el alumno:', formattedName);
-                            }
-                        } else {
-                            console.warn('No se encontró la fila del alumno para las observaciones:', formattedName);
-                        }
-                    }
-                } else {
-                    console.warn('No se encontró coincidencia para el alumno:', formattedName);
-                }
-            }
-        }
-        const updateButton = document.getElementById('imc-bt-guarda-avaluacio');
-        if (updateButton) {
-            updateButton.disabled = false;
-            updateButton.click();
-        } else {
-            console.warn('No se encontró el botón de guardar evaluación.');
-        }
-    }
 })();
