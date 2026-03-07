@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ITACA MD2 docent.edu.gva.es - Importador de Calificaciones y Observaciones
 // @namespace    https://lpla.github.io/
-// @version      0.4.0
+// @version      0.4.1
 // @description  Importa calificaciones y observaciones desde un archivo Excel a la plataforma "mòdul docent 2" (MD2) de ITACA.
 // @author       lpla
 // @match        https://docent.edu.gva.es/md-front/www/*
@@ -27,18 +27,38 @@
             appearance: auto !important;
             -moz-appearance: auto !important;
         }
-
+    
         #pluginContainer input[type="number"]::-webkit-outer-spin-button,
         #pluginContainer input[type="number"]::-webkit-inner-spin-button {
             -webkit-appearance: auto !important;
             margin: 0;
             opacity: 1 !important;
         }
-
+    
         #pluginContainer button {
             font-family: inherit;
+            appearance: none;
+            -webkit-appearance: none;
+            border: 1px solid rgba(255,255,255,0.45);
+            background: #19afe0;
+            color: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
         }
-
+    
+        #pluginContainer button:hover:not(:disabled) {
+            filter: brightness(1.05);
+        }
+    
+        #pluginContainer button:disabled {
+            background: #7f8c94;
+            border-color: rgba(255,255,255,0.25);
+            color: rgba(255,255,255,0.8);
+            cursor: not-allowed;
+            opacity: 1;
+        }
+    
         #pluginContainer .plugin-box {
             margin-top: 8px;
             padding: 6px;
@@ -46,19 +66,19 @@
             background: rgba(255,255,255,0.08);
             font-size: 0.85em;
         }
-
+    
         #pluginContainer .plugin-box h4 {
             margin: 0 0 6px 0;
             font-size: 1em;
         }
-
+    
         #pluginContainer table {
             width: 100%;
             border-collapse: collapse;
             table-layout: fixed;
             font-size: 0.8em;
         }
-
+    
         #pluginContainer th,
         #pluginContainer td {
             border: 1px solid rgba(255,255,255,0.2);
@@ -66,17 +86,17 @@
             vertical-align: top;
             word-break: break-word;
         }
-
+    
         #pluginContainer ul {
             margin: 6px 0 0 18px;
             padding: 0;
         }
-
+    
         #pluginContainer .muted {
             opacity: 0.85;
             font-size: 0.8em;
         }
-
+    
         #pluginContainer .compact {
             margin: 4px 0;
         }
@@ -365,6 +385,12 @@
     importButton.style.marginTop = '6px';
     importButton.style.padding = '6px';
     importButton.style.cursor = 'pointer';
+    importButton.style.background = '#19afe0';
+    importButton.style.color = 'white';
+    importButton.style.border = '1px solid rgba(255,255,255,0.45)';
+    importButton.style.borderRadius = '4px';
+    importButton.style.fontWeight = 'bold';
+    importButton.style.boxShadow = '0 1px 2px rgba(0,0,0,0.25)';
     controlsContainer.appendChild(importButton);
 
     const configDiv = document.createElement('div');
@@ -468,45 +494,60 @@
         }, 5000);
     }
 
+    function trimWords(value, maxWords = 10) {
+        const text = String(value ?? '').trim();
+        if (!text) return '';
+    
+        const words = text.split(/\s+/);
+        if (words.length <= maxWords) {
+            return text;
+        }
+    
+        return `${words.slice(0, maxWords).join(' ')}…`;
+    }
+
     function renderPreview() {
         if (!currentFileData) {
             previewContainer.style.display = 'none';
             previewContainer.innerHTML = '';
             return;
         }
-
+    
         const configured = getConfiguredColumns();
         if (!configured) {
             previewContainer.style.display = 'block';
             previewContainer.innerHTML = '<h4>Vista previa</h4><div>La configuración de columnas no es válida.</div>';
             return;
         }
-
+    
         const { headerRow, studentData, fileName, sheetName } = currentFileData;
-        const rows = studentData.slice(0, 5);
-
+        const rows = studentData.slice(0, 3);
+    
         const previewColumns = [
-            { label: 'Nombres', index: configured.colName },
-            { label: 'Notas', index: configured.colMark },
-            { label: 'Observaciones', index: configured.colObservation }
+            { label: 'Nombres', index: configured.colName, trimPreviewWords: null },
+            { label: 'Notas', index: configured.colMark, trimPreviewWords: null },
+            { label: 'Observaciones', index: configured.colObservation, trimPreviewWords: 10 }
         ];
-
+    
         const tableHead = previewColumns.map(col => {
             const headerValue = col.index != null ? (headerRow[col.index] ?? `Columna ${col.index + 1}`) : '(sin columna)';
             const number = col.index != null ? `C${col.index + 1}` : '—';
             return `<th>${escapeHtml(col.label)}<br><span class="muted">${escapeHtml(number)} · ${escapeHtml(headerValue)}</span></th>`;
         }).join('');
-
+    
         const tableRows = rows.length
             ? rows.map(row => {
                 const tds = previewColumns.map(col => {
-                    const value = col.index != null ? (row[col.index] ?? '') : '';
-                    return `<td>${escapeHtml(value)}</td>`;
+                    const rawValue = col.index != null ? (row[col.index] ?? '') : '';
+                    const previewValue = col.trimPreviewWords
+                        ? trimWords(rawValue, col.trimPreviewWords)
+                        : rawValue;
+                    return `<td>${escapeHtml(previewValue)}</td>`;
                 }).join('');
                 return `<tr>${tds}</tr>`;
             }).join('')
             : '<tr><td colspan="3">No hay filas de datos en la hoja.</td></tr>';
-
+    
         previewContainer.style.display = 'block';
         previewContainer.innerHTML = `
             <h4>Vista previa</h4>
