@@ -1,15 +1,16 @@
 // ==UserScript==
 // @name         ITACA MD2 docent.edu.gva.es - Importador de Calificaciones y Observaciones
 // @namespace    https://lpla.github.io/
-// @version      0.4.5
+// @version      0.4.6
 // @description  Importa calificaciones y observaciones desde un archivo Excel a la plataforma "mòdul docent 2" (MD2) de ITACA.
 // @author       lpla
 // @match        https://docent.edu.gva.es/md-front/www/*
 // @require      https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
 // @grant        none
-// @updateURL    https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js
-// @downloadURL  https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js
-// @supportURL   https://github.com/lpla/userscripts/issues
+// @homepageURL  https://github.com/lpla/itaca-md2-importador
+// @updateURL    https://raw.githubusercontent.com/lpla/itaca-md2-importador/main/itaca.user.js
+// @downloadURL  https://raw.githubusercontent.com/lpla/itaca-md2-importador/main/itaca.user.js
+// @supportURL   https://github.com/lpla/itaca-md2-importador/issues
 // ==/UserScript==
 
 (function() {
