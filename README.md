@@ -31,7 +31,7 @@ Quan s'òbriga la botiga d'extensions del navegador, prem **Instal·lar**, **Afe
 
 Amb Tampermonkey ja instal·lat, fes clic ací:
 
-## **[Instal·lar l'script d'ITACA MD2](https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js)**
+## **[Instal·lar l'script d'ITACA MD2](https://raw.githubusercontent.com/lpla/itaca-md2-importador/main/itaca.user.js)**
 
 S'obrirà una pantalla de Tampermonkey amb l'script carregat.
 
@@ -129,7 +129,7 @@ Revisa com apareix escrit el nom en l'Excel i com apareix en ITACA. Si hi ha dif
 
 Si alguna cosa no funciona, pots obrir una incidència ací:
 
-## **[Informar d'un problema](https://github.com/lpla/userscripts/issues)**
+## **[Informar d'un problema](https://github.com/lpla/itaca-md2-importador/issues)**
 
 Perquè siga més fàcil ajudar-te, intenta indicar:
 
@@ -191,7 +191,7 @@ Cuando se abra la tienda de extensiones de tu navegador, pulsa **Instalar**, **A
 
 Con Tampermonkey ya instalado, pulsa aquí:
 
-## **[Instalar el script de ITACA MD2](https://raw.githubusercontent.com/lpla/userscripts/main/itaca.user.js)**
+## **[Instalar el script de ITACA MD2](https://raw.githubusercontent.com/lpla/itaca-md2-importador/main/itaca.user.js)**
 
 Se abrirá una pantalla de Tampermonkey con el script cargado.
 
@@ -289,7 +289,7 @@ Revisa cómo aparece escrito el nombre en el Excel y cómo aparece en ITACA. Si 
 
 Si algo no funciona, puedes abrir una incidencia aquí:
 
-## **[Reportar un problema](https://github.com/lpla/userscripts/issues)**
+## **[Reportar un problema](https://github.com/lpla/itaca-md2-importador/issues)**
 
 Para que sea más fácil ayudarte, intenta indicar:
 
