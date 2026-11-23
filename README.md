@@ -4,6 +4,11 @@ Este repositori conté un únic script per a facilitar la importació de **notes
 
 Està pensat per a professorat que vol estalviar temps en passar dades a ITACA sense haver d'escriure-les una a una.
 
+[Llegir en castellà](#castellano)
+
+> [!IMPORTANT]
+> **Importar archivo preparado** pot substituir notes i observacions existents i intenta guardar l'avaluació automàticament. La vista prèvia mostra les primeres files de l'Excel. Les coincidències amb l'alumnat es calculen en importar.
+
 ---
 
 ## Instal·lació
@@ -25,6 +30,10 @@ Tria el teu navegador i fes clic en l'enllaç corresponent:
 
 Quan s'òbriga la botiga d'extensions del navegador, prem **Instal·lar**, **Afegir** o **Obtindre**, segons el cas.
 
+En **Chrome i Edge**, obri **Gestiona l'extensió** de Tampermonkey i activa **Permet els scripts d'usuari** si apareix. Si el teu navegador mostra una altra opció, consulta la [guia de permisos de Tampermonkey](https://www.tampermonkey.net/faq.php?locale=es&q=Q209). Si el centre gestiona el navegador i l'opció està blocada, consulta la persona responsable d'informàtica.
+
+En **Safari**, activa Tampermonkey en **Safari → Configuració → Extensions** i permet que l'extensió funcione en `docent.edu.gva.es`.
+
 ---
 
 ### Pas 2: instal·lar l'script d'ITACA
@@ -41,17 +50,11 @@ Prem **Instal·lar**.
 
 ## Com s'utilitza
 
-1. Entra en **ITACA MD2**.
-2. Ves a la pantalla de **qualificacions** del grup i de l'avaluació en què vols treballar.
-3. Veuràs un xicotet panell de l'importador en el cantó superior esquerre.
-4. Selecciona el fitxer Excel.
-5. Revisa la **vista prèvia**.
-6. Comprova que les columnes de:
-   - noms,
-   - notes,
-   - observacions  
-   són correctes.
-7. Prem **Importar archivo preparado**.
+1. Entra en [ITACA MD2](https://docent.edu.gva.es/md-front/www/) i obri les **qualificacions** del grup, la matèria i l'avaluació corresponents. Si canvies de grup, matèria o avaluació, recarrega la pàgina i selecciona de nou l'Excel corresponent.
+2. Selecciona el fitxer Excel en el panell de l'importador, en el cantó superior esquerre.
+3. Revisa el nom del fitxer, el de la primera pestanya i les columnes en la **vista prèvia**. Compara també la llista completa de l'Excel amb l'alumnat que apareix en ITACA. L'script relaciona les files pel nom i pot acceptar coincidències aproximades. Si hi ha homònims o coincidències dubtoses, exclou eixes files de l'Excel i introduïx eixes dades manualment en ITACA.
+4. Prem **Importar archivo preparado** quan hages comprovat les dades. Espera que aparega l'informe i revisa les coincidències aproximades, les files omeses i les incidències abans de continuar.
+5. Comprova en ITACA les notes i observacions i que l'avaluació s'ha guardat. **Guardado lanzado: sí** indica que l'importador ha premut el botó de guardar d'ITACA.
 
 ---
 
@@ -62,13 +65,9 @@ L'script treballa amb fitxers Excel:
 - `.xlsx`
 - `.xls`
 
-El més habitual és que el fitxer tinga una primera fila amb capçaleres i, després, una fila per alumne.
+L'script llig només la **primera pestanya** i reserva la primera fila per a les capçaleres. Comença en la columna A i posa una fila per alumne.
 
-Exemple senzill:
-
-- una columna amb el **nom de l'alumne**;
-- una columna amb la **nota**;
-- una columna amb l'**observació**.
+Prepara una columna amb el **nom complet** (preferiblement `Cognoms, Nom`, tal com apareix en ITACA), una amb la **nota numèrica** i, si cal, una amb l'**observació**. Una fila amb la nota buida s'omet encara que continga una observació. Si només vols importar notes, deixa buit el camp **Columna de observaciones** del panell.
 
 L'script intenta detectar estes columnes automàticament, però convé revisar sempre la vista prèvia abans d'importar.
 
@@ -76,15 +75,9 @@ L'script intenta detectar estes columnes automàticament, però convé revisar s
 
 ## Privacitat i tractament de dades
 
-Este punt és especialment important perquè les dades no ixen del teu dispositiu i només s'escriuen en la web d'ITACA que tens oberta. Res més.
-
 ### Què fa l'script amb les teues dades
 
-- El fitxer Excel es **llig en el teu propi navegador**, en el teu propi ordinador.
-- L'script **no puja el fitxer Excel a servidors externs aliens a ITACA**.
-- L'script treballa sobre la pàgina oficial d'**ITACA** que ja tens oberta en el navegador.
-- Quan importes, les dades s'escriuen únicament en **ITACA**, perquè precisament esta és la finalitat de l'eina.
-- L'script **no necessita enviar les dades a servicis de tercers** per a funcionar, ni per a obtindre estadístiques ni per a cap altra finalitat semblant.
+El navegador llig l'Excel localment amb la biblioteca SheetJS que descarrega Tampermonkey. En importar, l'script ompli els camps de la pàgina oficial d'ITACA. En guardar l'avaluació, ITACA rep les dades a través de la teua sessió.
 
 ### Què guarda en el navegador
 
@@ -103,7 +96,7 @@ Encara que el tractament és local en el navegador, estàs treballant amb dades 
 Per això convé:
 
 - revisar sempre el fitxer abans d'importar-lo;
-- fer primer una prova amb un grup reduït o amb dades de prova;
+- fer la primera prova amb dades fictícies si disposes d'un entorn autoritzat de proves;
 - comprovar el resultat final en ITACA abans de donar-lo per bo;
 - no compartir captures de pantalla ni fitxers reals quan informes d'un error.
 
@@ -112,10 +105,10 @@ Per això convé:
 ## Problemes freqüents
 
 ### He premut l'enllaç d'instal·lació i no passa res
-Assegura't d'haver instal·lat abans **Tampermonkey** en el navegador.
+Comprova que **Tampermonkey** està actiu en el navegador on has obert l'enllaç. Si veus el codi de l'script en lloc de la pantalla d'instal·lació, revisa els permisos del pas 1 i torna a obrir l'enllaç.
 
 ### L'script no apareix en ITACA
-Comprova que estàs en la pantalla de **qualificacions** d'un grup i una avaluació concreta.
+Comprova en el tauler de Tampermonkey que l'script està instal·lat i activat. Recarrega ITACA MD2 i obri les **qualificacions** d'un grup i una avaluació concreta. Si veus el panell amb un missatge d'instruccions, l'script està actiu i espera que òbrigues la pantalla de qualificacions.
 
 ### Les columnes no són correctes
 Revisa-les manualment en el panell abans d'importar. La detecció automàtica ajuda, però no sempre encerta.
@@ -131,14 +124,7 @@ Si alguna cosa no funciona, pots obrir una incidència ací:
 
 ## **[Informar d'un problema](https://github.com/lpla/itaca-md2-importador/issues)**
 
-Perquè siga més fàcil ajudar-te, intenta indicar:
-
-- quin navegador utilitzes;
-- si tens Tampermonkey instal·lat;
-- què estaves intentant fer;
-- quin missatge ha aparegut;
-- una captura de pantalla, si pots;
-- i, si el problema està en l'Excel, descriu l'estructura del fitxer **sense incloure dades personals reals**.
+Indica el navegador, la versió de Tampermonkey i la de l'script (visible en el tauler de Tampermonkey). Descriu el pas que falla i, si cal, les capçaleres de l'Excel o els recomptes de l'informe. Si aportes un exemple o una captura, recrea'ls amb dades fictícies. Mantín els fitxers, captures i informes reals dins de l'entorn del centre.
 
 ---
 
@@ -164,6 +150,9 @@ Este repositorio contiene un único script para facilitar la importación de **n
 
 Está pensado para profesorado que quiere ahorrar tiempo al pasar datos a ITACA sin tener que escribirlos uno a uno.
 
+> [!IMPORTANT]
+> **Importar archivo preparado** puede sustituir notas y observaciones existentes e intenta guardar la evaluación automáticamente. La vista previa muestra las primeras filas del Excel. Las coincidencias con el alumnado se calculan al importar.
+
 ---
 
 ## Instalación
@@ -185,6 +174,10 @@ Elige tu navegador y pulsa en el enlace correspondiente:
 
 Cuando se abra la tienda de extensiones de tu navegador, pulsa **Instalar**, **Añadir** o **Obtener**, según el caso.
 
+En **Chrome y Edge**, abre **Gestionar extensión** de Tampermonkey y activa **Permitir secuencias de comandos de usuario** o **Permitir Userscripts** si aparece. Si tu navegador muestra otra opción, consulta la [guía de permisos de Tampermonkey](https://www.tampermonkey.net/faq.php?locale=es&q=Q209). Si el centro gestiona el navegador y la opción está bloqueada, consulta a la persona responsable de informática.
+
+En **Safari**, activa Tampermonkey en **Safari → Ajustes → Extensiones** y permite que la extensión funcione en `docent.edu.gva.es`.
+
 ---
 
 ### Paso 2: instalar el script de ITACA
@@ -201,17 +194,11 @@ Pulsa **Instalar**.
 
 ## Cómo usarlo
 
-1. Entra en **ITACA MD2**.
-2. Ve a la pantalla de **calificaciones** del grupo y de la evaluación en la que quieres trabajar.
-3. Verás un pequeño panel del importador en la esquina superior izquierda.
-4. Selecciona tu archivo Excel.
-5. Revisa la **vista previa**.
-6. Comprueba que las columnas de:
-   - nombres,
-   - notas,
-   - observaciones  
-   son correctas.
-7. Pulsa **Importar archivo preparado**.
+1. Entra en [ITACA MD2](https://docent.edu.gva.es/md-front/www/) y abre las **calificaciones** del grupo, la materia y la evaluación correspondientes. Si cambias de grupo, materia o evaluación, recarga la página y selecciona de nuevo el Excel correspondiente.
+2. Selecciona el archivo Excel en el panel del importador, en la esquina superior izquierda.
+3. Revisa el nombre del archivo, el de la primera pestaña y las columnas en la **vista previa**. Compara también la lista completa del Excel con el alumnado que aparece en ITACA. El script empareja las filas por nombre y puede aceptar coincidencias aproximadas. Si hay homónimos o coincidencias dudosas, excluye esas filas del Excel e introduce esos datos a mano en ITACA.
+4. Pulsa **Importar archivo preparado** cuando hayas comprobado los datos. Espera a que aparezca el informe y revisa las coincidencias aproximadas, las filas omitidas y las incidencias antes de continuar.
+5. Comprueba en ITACA las notas y observaciones y que la evaluación se ha guardado. **Guardado lanzado: sí** indica que el importador ha pulsado el botón de guardar de ITACA.
 
 ---
 
@@ -222,13 +209,9 @@ El script trabaja con archivos Excel:
 - `.xlsx`
 - `.xls`
 
-Lo normal es que el archivo tenga una primera fila con cabeceras y, después, una fila por alumno.
+El script lee solo la **primera pestaña** y reserva la primera fila para las cabeceras. Empieza en la columna A y pon una fila por alumno.
 
-Ejemplo sencillo:
-
-- una columna con el **nombre del alumno**
-- una columna con la **nota**
-- una columna con la **observación**
+Prepara una columna con el **nombre completo** (preferiblemente `Apellidos, Nombre`, tal como aparece en ITACA), otra con la **nota numérica** y, si procede, otra con la **observación**. Una fila con la nota vacía se omite aunque contenga una observación. Si solo quieres importar notas, deja vacío el campo **Columna de observaciones** del panel.
 
 El script intenta detectar esas columnas automáticamente, pero conviene revisar siempre la vista previa antes de importar.
 
@@ -236,15 +219,9 @@ El script intenta detectar esas columnas automáticamente, pero conviene revisar
 
 ## Privacidad y tratamiento de datos
 
-Este punto es especialmente importante porque los datos no salen de tu dispositivo, y sólo se escriben en la web de ITACA que tienes abierta. Nada más.
-
 ### Qué hace el script con tus datos
 
-- El archivo Excel se **lee en tu propio navegador**, en tu propio ordenador.
-- El script **no sube el archivo Excel a servidores externos ajenos a ITACA**.
-- El script trabaja sobre la página oficial de **ITACA** que tú ya tienes abierta en el navegador.
-- Cuando importas, los datos se escriben únicamente en **ITACA**, porque precisamente esa es la finalidad de la herramienta.
-- El script **no necesita enviar los datos a servicios de terceros** para funcionar, ni para obtener estadísticas ni nada por el estilo.
+El navegador lee el Excel localmente con la biblioteca SheetJS que descarga Tampermonkey. Al importar, el script rellena los campos de la página oficial de ITACA. Al guardar la evaluación, ITACA recibe los datos a través de tu sesión.
 
 ### Qué guarda en tu navegador
 
@@ -263,7 +240,7 @@ Aunque el tratamiento es local en el navegador, estás trabajando con datos acad
 Por eso conviene:
 
 - revisar siempre el archivo antes de importarlo;
-- hacer una prueba primero con un grupo pequeño o con datos de prueba;
+- hacer la primera prueba con datos ficticios si dispones de un entorno de pruebas autorizado;
 - comprobar el resultado final en ITACA antes de darlo por bueno;
 - no compartir capturas de pantalla o archivos reales al reportar errores.
 
@@ -272,10 +249,10 @@ Por eso conviene:
 ## Problemas frecuentes
 
 ### He pulsado el enlace de instalación y no pasa nada
-Asegúrate de haber instalado antes **Tampermonkey** en el navegador.
+Comprueba que **Tampermonkey** está activo en el navegador donde has abierto el enlace. Si ves el código del script en lugar de la pantalla de instalación, revisa los permisos del paso 1 y vuelve a abrir el enlace.
 
 ### El script no aparece en ITACA
-Comprueba que estás en la pantalla de **calificaciones** de un grupo y una evaluación concreta.
+Comprueba en el panel de Tampermonkey que el script está instalado y activado. Recarga ITACA MD2 y abre las **calificaciones** de un grupo y una evaluación concreta. Si ves el panel con un mensaje de instrucciones, el script está activo y espera a que abras la pantalla de calificaciones.
 
 ### Las columnas no son correctas
 Revísalas manualmente en el panel antes de importar. La detección automática ayuda, pero no siempre acierta.
@@ -291,14 +268,7 @@ Si algo no funciona, puedes abrir una incidencia aquí:
 
 ## **[Reportar un problema](https://github.com/lpla/itaca-md2-importador/issues)**
 
-Para que sea más fácil ayudarte, intenta indicar:
-
-- qué navegador usas;
-- si tienes Tampermonkey instalado;
-- qué estabas intentando hacer;
-- qué mensaje apareció;
-- una captura de pantalla, si puedes;
-- y, si el problema está en el Excel, describe la estructura del archivo **sin incluir datos personales reales**.
+Indica el navegador, la versión de Tampermonkey y la del script (visible en el panel de Tampermonkey). Describe el paso que falla y, si hace falta, las cabeceras del Excel o los recuentos del informe. Si aportas un ejemplo o una captura, recréalos con datos ficticios. Mantén los archivos, capturas e informes reales dentro del entorno del centro.
 
 ---
 
